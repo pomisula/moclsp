@@ -1,6 +1,8 @@
-# MOCLSP Test Instances
+# MOCLSP (Source Code Coming Soon)
 
 ## About the Test Instances
+
+MOCLSP (**Multi-Objective Capacitated Lot Sizing Problem**).
 
 This project contains 50 modified test instances based on classic CLSP benchmarks, designed for algorithm performance evaluation and comparative analysis.
 
@@ -52,7 +54,7 @@ inst_T{periods}_J{items}_{index}.txt
 
 For example: `inst_T15_J12_13.txt` represents an instance with 15 periods and 12 items.
 
-## Source Code
+## Source Code (Coming soon)
 
 The source code and implementation details will be released publicly in the future.
 

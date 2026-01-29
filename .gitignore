@@ -1,0 +1,7 @@
+*.tex
+*.aux
+*.log
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+result_page-*.png
