@@ -60,4 +60,3 @@ The source code and implementation details will be released publicly in the futu
 
 ---
 
-*Last updated: January 2026*
