@@ -5,3 +5,24 @@
 *.fls
 *.fdb_latexmk
 result_page-*.png
+
+# Build artifacts
+build/
+cmake-build-*/
+CMakePresets.json
+
+# Experiment outputs
+out/
+out_results/
+out_results_test/
+out_solution/
+plots/
+hv_igd_results/
+orthogonal_results/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Script folders
+scripts/
