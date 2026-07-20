@@ -38,19 +38,19 @@ The original benchmark data contains 10 relevant period-item (`T x J`) configura
 
 Each instance file is organized into labeled data sections. The labels follow the naming convention of the original benchmark data:
 
-| Section | Description |
-| ------- | ----------- |
-| `INDEX` | Instance dimensions: number of items (`J`), periods (`T`), and machines/resources (`M`) |
-| `LAGKOST` | Unit holding cost for each item |
-| `L0` | Initial inventory for each item |
-| `LT` | Lead time for each item; all included instances use zero lead times |
-| `KAPAZ` | Available capacity for each machine/resource and period |
-| `P-BEDARF` | Demand for each item and period |
-| `PRODKOEF` | Production time coefficient for each machine/resource and item |
-| `RUESTK` | Setup cost for each item |
-| `RUESTZ` | Setup time for each machine/resource and item |
-| `UEBER-KS` | Overtime cost per unit of capacity overuse |
-| `DIREKT-B` | Empty section preserved from the original instance format |
+| Section | Description | Structure |
+| ------- | ----------- | --------- |
+| `INDEX` | Instance dimensions, number of items (`J`), periods (`T`), and machines/resources (`M`) | 1 row with 3 values, `J, T, M` |
+| `LAGKOST` | Unit holding cost for each item | 1 row with `J` values |
+| `L0` | Beginning inventory for each item | 1 row with `J` values |
+| `LT` | Ending inventory for each item | 1 row with `J` values |
+| `KAPAZ` | Available capacity for each machine/resource and period | `M` rows and `T` columns |
+| `P-BEDARF` | Demand for each item and period | `J` rows and `T` columns |
+| `PRODKOEF` | Production coefficient, capacity needed on a machine/resource for one unit of an item | One row per machine/resource-item pair, `m, j, value` |
+| `RUESTK` | Setup cost for each item | `J` rows and 1 column |
+| `RUESTZ` | Setup time for each machine/resource and item | One row per machine/resource-item pair, `m, j, value` |
+| `UEBER-KS` | Overtime cost per unit of capacity overuse | `M` rows and 1 column |
+| `DIREKT-B` | Demand coefficients preserved from the original instance format | Empty for the included single-level instances |
 
 ### Naming Convention
 
