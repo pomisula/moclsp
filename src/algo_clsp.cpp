@@ -65,7 +65,7 @@ std::tuple<Matrix, SolutionMetrics, int> lns_search(const Model& model, const Ma
         lns_relax_and_repair(model, tmp, rng, relax_frac);
         SolutionMetrics m = model.evaluate_solution(build_solution(model, tmp));
         ++evals;
-        if (evo::dominates(m, best_m) || m.total_cost < best_m.total_cost) {
+        if (evo::dominates(m, best_m)) {
             best = std::move(tmp);
             best_m = m;
         }
@@ -246,7 +246,7 @@ std::vector<evo::CandidateSolution> AlgoCLSP::run(const TerminationCriteria& ter
                     auto [lns_prod, lns_metrics, evals] = lns_search(
                         model_, pop[idx].prod, pop[idx].metrics, rng, evo::ops_clsp.lns_iters, evo::ops_clsp.lns_relax_frac);
                     evaluations += evals;
-                    if (evo::dominates(lns_metrics, pop[idx].metrics) || lns_metrics.total_cost < pop[idx].metrics.total_cost) {
+                    if (evo::dominates(lns_metrics, pop[idx].metrics) ) {
                         pop[idx].prod = std::move(lns_prod);
                         pop[idx].metrics = lns_metrics;
                     }
