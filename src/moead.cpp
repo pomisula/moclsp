@@ -17,6 +17,7 @@ MOEAD::MOEAD(const Model& model, int pop_size)
 
 namespace {
 std::vector<std::array<double, 3>> uniform_weights(int N) {
+    // Simple grid on simplex for 3 objectives
     int H = 1;
     while ((H + 1) * (H + 2) / 2 < N) ++H;
     std::vector<std::array<double, 3>> ws;
@@ -42,12 +43,30 @@ std::vector<std::array<double, 3>> uniform_weights(int N) {
 std::vector<CandidateSolution> MOEAD::run(const TerminationCriteria& term, ProgressLogger* logger, bool use_repair) {
     std::mt19937 rng(std::random_device{}());
 
+    // Base weights fixed; following MOEA/D (Tchebycheff, constraint handling)
     const auto base_weights = uniform_weights(pop_size_);
     const int T = std::max(2, static_cast<int>(std::ceil(pop_size_ / 10.0)));
     const int nr = std::max(1, static_cast<int>(std::ceil(pop_size_ / 100.0)));
 
     std::vector<Matrix> prod = evo::random_population(model_, pop_size_, rng, 1.5, use_repair);
     std::vector<CandidateSolution> population = evo::evaluate_population(model_, prod);
+
+    std::array<double, 3> zmin = {std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::infinity(),
+                                  std::numeric_limits<double>::infinity()};
+    for (const auto& c : population) {
+        if (c.metrics.unmet_demand > 1e-9) continue;
+        zmin[0] = std::min(zmin[0], c.metrics.holding_cost);
+        zmin[1] = std::min(zmin[1], c.metrics.setup_cost);
+        zmin[2] = std::min(zmin[2], c.metrics.overtime_cost);
+    }
+    if (!std::isfinite(zmin[0])) {
+        for (const auto& c : population) {
+            zmin[0] = std::min(zmin[0], c.metrics.holding_cost);
+            zmin[1] = std::min(zmin[1], c.metrics.setup_cost);
+            zmin[2] = std::min(zmin[2], c.metrics.overtime_cost);
+        }
+    }
 
     int generation = 0;
     int evaluations = static_cast<int>(population.size());
@@ -60,25 +79,37 @@ std::vector<CandidateSolution> MOEAD::run(const TerminationCriteria& term, Progr
             double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
             if (elapsed >= term.max_seconds) break;
         }
-        std::array<double, 3> zmin = {std::numeric_limits<double>::infinity(),
-                                      std::numeric_limits<double>::infinity(),
-                                      std::numeric_limits<double>::infinity()};
-        std::array<double, 3> zmax = {0.0, 0.0, 0.0};
+        std::array<double, 3> zmax = {-std::numeric_limits<double>::infinity(),
+                                      -std::numeric_limits<double>::infinity(),
+                                      -std::numeric_limits<double>::infinity()};
         for (const auto& c : population) {
-            zmin[0] = std::min(zmin[0], c.metrics.holding_cost);
-            zmin[1] = std::min(zmin[1], c.metrics.setup_cost);
-            zmin[2] = std::min(zmin[2], c.metrics.overtime_cost);
+            if (c.metrics.unmet_demand > 1e-9) continue;
             zmax[0] = std::max(zmax[0], c.metrics.holding_cost);
             zmax[1] = std::max(zmax[1], c.metrics.setup_cost);
             zmax[2] = std::max(zmax[2], c.metrics.overtime_cost);
         }
-        double noml = std::max({zmax[0], zmax[1], zmax[2], 1e-9});
-        std::array<double, 3> scale = {zmax[0] / noml, zmax[1] / noml, zmax[2] / noml};
+        if (!std::isfinite(zmax[0])) {
+            for (const auto& c : population) {
+                zmax[0] = std::max(zmax[0], c.metrics.holding_cost);
+                zmax[1] = std::max(zmax[1], c.metrics.setup_cost);
+                zmax[2] = std::max(zmax[2], c.metrics.overtime_cost);
+            }
+        }
+
+        // Use cumulative feasible zmin and current-population zmax to build inverse-scale weights.
+        std::array<double, 3> range = {
+            std::max(zmax[0] - zmin[0], 1e-9),
+            std::max(zmax[1] - zmin[1], 1e-9),
+            std::max(zmax[2] - zmin[2], 1e-9)
+        };
 
         std::vector<std::array<double, 3>> weights(pop_size_);
         for (int i = 0; i < pop_size_; ++i) {
-            weights[i] = {base_weights[i][0] * scale[0], base_weights[i][1] * scale[1], base_weights[i][2] * scale[2]};
-            for (double& w : weights[i]) w = std::max(1e-6, w);
+            weights[i] = {
+                std::max(base_weights[i][0] / range[0], 1e-6),
+                std::max(base_weights[i][1] / range[1], 1e-6),
+                std::max(base_weights[i][2] / range[2], 1e-6)
+            };
         }
 
         std::vector<std::vector<int>> neigh(pop_size_);
@@ -95,6 +126,7 @@ std::vector<CandidateSolution> MOEAD::run(const TerminationCriteria& term, Progr
             for (int k = 0; k < T && k < static_cast<int>(dist.size()); ++k) neigh[i].push_back(dist[k].second);
         }
 
+        // Pre-build global index list for occasional global mating
         std::vector<int> all_idx(pop_size_);
         std::iota(all_idx.begin(), all_idx.end(), 0);
 
@@ -118,10 +150,14 @@ std::vector<CandidateSolution> MOEAD::run(const TerminationCriteria& term, Progr
             CandidateSolution cand = evo::evaluate(model_, child);
             evaluations++;
 
-            zmin[0] = std::min(zmin[0], cand.metrics.holding_cost);
-            zmin[1] = std::min(zmin[1], cand.metrics.setup_cost);
-            zmin[2] = std::min(zmin[2], cand.metrics.overtime_cost);
+            // Update ideal point only with feasible offspring.
+            if (cand.metrics.unmet_demand <= 1e-9) {
+                zmin[0] = std::min(zmin[0], cand.metrics.holding_cost);
+                zmin[1] = std::min(zmin[1], cand.metrics.setup_cost);
+                zmin[2] = std::min(zmin[2], cand.metrics.overtime_cost);
+            }
 
+            // Update neighbours using constrained Tchebycheff
             int replaced = 0;
             for (int idx : pool) {
                 if (replaced >= nr) break;
@@ -159,5 +195,6 @@ std::vector<CandidateSolution> MOEAD::run(const TerminationCriteria& term, Progr
         }
     }
 
+    // Return final population; downstream can filter non-dominated solutions later.
     return population;
 }
