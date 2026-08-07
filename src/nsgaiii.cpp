@@ -29,31 +29,6 @@ double dot3(const std::array<double, 3>& a, const std::array<double, 3>& b) {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
 
-std::vector<std::array<double, 3>> uniform_points_3d(int n) {
-    int h = 1;
-    while ((h + 1) * (h + 2) / 2 < n) ++h;
-    std::vector<std::array<double, 3>> z;
-    for (int a = 0; a <= h; ++a) {
-        for (int b = 0; b <= h - a; ++b) {
-            int c = h - a - b;
-            double s = static_cast<double>(h);
-            z.push_back({a / s, b / s, c / s});
-        }
-    }
-    if (static_cast<int>(z.size()) > n) z.resize(n);
-    while (static_cast<int>(z.size()) < n) {
-        double r1 = static_cast<double>(rand()) / RAND_MAX;
-        double r2 = static_cast<double>(rand()) / RAND_MAX;
-        double r3 = static_cast<double>(rand()) / RAND_MAX;
-        double sum = r1 + r2 + r3 + kEps;
-        z.push_back({r1 / sum, r2 / sum, r3 / sum});
-    }
-    for (auto& v : z) {
-        for (double& x : v) x = std::max(x, 1e-6);
-    }
-    return z;
-}
-
 bool solve3x3(const std::array<std::array<double, 3>, 3>& a, const std::array<double, 3>& b,
               std::array<double, 3>& x) {
     double m[3][4] = {
@@ -100,6 +75,7 @@ std::vector<int> last_selection(const std::vector<std::array<double, 3>>& pop_ob
     int n1 = static_cast<int>(pop_obj1.size());
     int nz = static_cast<int>(z.size());
 
+    // Extreme points via ASF
     std::array<int, 3> extreme = {0, 0, 0};
     for (int i = 0; i < 3; ++i) {
         std::array<double, 3> w = {1e-6, 1e-6, 1e-6};
@@ -143,10 +119,12 @@ std::vector<int> last_selection(const std::vector<std::array<double, 3>>& pop_ob
         }
     }
 
+    // Normalization
     for (auto& p : pop_obj) {
         for (int d = 0; d < 3; ++d) p[d] /= a[d];
     }
 
+    // Associate each solution to one reference point
     std::vector<int> pi(n, 0);
     std::vector<double> dist(n, std::numeric_limits<double>::infinity());
     for (int i = 0; i < n; ++i) {
@@ -292,8 +270,9 @@ NSGAIII::NSGAIII(const Model& model, int pop_size) : model_(model), pop_size_(po
 std::vector<CandidateSolution> NSGAIII::run(const TerminationCriteria& term, ProgressLogger* logger, bool use_repair) {
     std::mt19937 rng(std::random_device{}());
 
-    auto z = uniform_points_3d(pop_size_);
-    std::vector<Matrix> prod_pop = evo::random_population(model_, pop_size_, rng, 1.5, use_repair);
+    auto z = evo::uniform_points_nbi_3d(pop_size_);
+    const int n_pop = static_cast<int>(z.size());
+    std::vector<Matrix> prod_pop = evo::random_population(model_, n_pop, rng, 1.5, use_repair);
     std::vector<CandidateSolution> population = evo::evaluate_population(model_, prod_pop);
     auto zmin = compute_zmin_feasible(population);
 
@@ -309,13 +288,14 @@ std::vector<CandidateSolution> NSGAIII::run(const TerminationCriteria& term, Pro
             if (elapsed >= term.max_seconds) break;
         }
 
+        // Random parent selection (aligned with current NSGA-II setting)
         std::vector<CandidateSolution> offspring;
         std::vector<Matrix> prod_child;
-        offspring.reserve(pop_size_);
-        prod_child.reserve(pop_size_);
+        offspring.reserve(n_pop);
+        prod_child.reserve(n_pop);
         std::uniform_real_distribution<> ur(0.0, 1.0);
-        std::uniform_int_distribution<int> psel(0, pop_size_ - 1);
-        while (static_cast<int>(offspring.size()) < pop_size_) {
+        std::uniform_int_distribution<int> psel(0, n_pop - 1);
+        while (static_cast<int>(offspring.size()) < n_pop) {
             int a = psel(rng);
             int b = psel(rng);
             Matrix child_prod = evo::crossover_sbx(prod_pop[a], prod_pop[b], rng, 20.0, evo::ops_nsgaiii.pc);
@@ -332,8 +312,11 @@ std::vector<CandidateSolution> NSGAIII::run(const TerminationCriteria& term, Pro
         prod_combined.insert(prod_combined.end(), prod_child.begin(), prod_child.end());
 
         zmin = compute_zmin_feasible(combined);
-        auto next = environmental_selection(combined, pop_size_, z, zmin, rng);
+        auto next = environmental_selection(combined, n_pop, z, zmin, rng);
 
+        // rebuild prod_pop by matching metrics+first positive entry heuristic fallback on index map
+        // safer: rebuild via selecting from combined indices from environmental_selection is not returned,
+        // so evaluate from plan directly.
         std::vector<Matrix> next_prod;
         next_prod.reserve(next.size());
         for (const auto& cs : next) {

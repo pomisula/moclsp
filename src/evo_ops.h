@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -9,6 +10,8 @@
 #include "model.h"
 #include "solution.h"
 
+// Common evolutionary helper types/operators so that algorithms stay "clean".
+// Swap/disable operators here when experimenting.
 namespace evo {
 
 using Matrix = std::vector<std::vector<double>>;
@@ -20,42 +23,75 @@ struct CandidateSolution {
 };
 
 struct OperatorProbs {
-    double pc = 1.0;
-    double p_shift = 1.0;
-    double p_toggle = 0.0;
+    double pc = 1.0;         // SBX crossover probability (per cell inside SBX)
+    double p_shift = 1.0;    // outer shift trigger
+    double p_toggle = 0.0;   // outer toggle trigger; per-cell prob inside operator
     double p_repair = 1.0;
-    double p_poly_mut = 0.0;
+    double p_lns = 0.0;
     int lns_iters = 3;
-    double lns_relax_frac = 0.25;
-    int lns_clusters = 0;
+    double lns_relax_frac = 0.25;  // fraction of periods to relax in LNS
+    int lns_clusters = 0;          // number of clusters for LNS refinement (0 => pop_size/5)
 };
 
+// Per-algorithm operator probability settings (configured in main.cpp).
 extern OperatorProbs ops_nsgaii;
 extern OperatorProbs ops_nsgaiii;
 extern OperatorProbs ops_moead;
 extern OperatorProbs ops_clsp;
 
+// Convert demands to a dense matrix (double).
+Matrix demand_matrix(const Model& model);
+
+// Ensure all demand is covered (adds production if needed), continuous.
 void repair_demand(const Model& model, Matrix& prod);
 
+// Random production matrices U(0, scale * demand); optional repair.
 std::vector<Matrix> random_population(const Model& model, int pop_size, std::mt19937& rng, double scale = 1.5,
                                       bool use_repair = true);
 
+// Build a Solution object from a production plan.
 Solution build_solution(const Model& model, const Matrix& prod);
 
+// Evaluate a production plan and return metrics.
 CandidateSolution evaluate(const Model& model, const Matrix& prod);
 
+// Evaluate many production plans.
 std::vector<CandidateSolution> evaluate_population(const Model& model, const std::vector<Matrix>& prod_vec);
 
+// PlatEMO-style UniformPoint(N,3,'NBI'); returned size is the actual sample count.
+std::vector<std::array<double, 3>> uniform_points_nbi_3d(int n);
+
+// Basic genetic operators (problem-aware). You may comment/replace.
+Matrix crossover_mix(const Matrix& a, const Matrix& b, std::mt19937& rng);
+// Simulated binary crossover (SBX) on all cells.
 Matrix crossover_sbx(const Matrix& a, const Matrix& b, std::mt19937& rng, double eta_c = 20.0, double pc = 1.0);
+// Cell-level uniform crossover (per (j,t) choose parent with prob p_b)
+Matrix crossover_uniform_cells(const Matrix& a, const Matrix& b, std::mt19937& rng, double p_b = 0.5);
 
 void mutate_shift(const Model& model, Matrix& prod, std::mt19937& rng);
+// Polynomial mutation on all cells (continuous).
 void mutate_poly(Matrix& prod, std::mt19937& rng, double eta_m = 20.0, double pm = -1.0);
+void lns_relax(const Model& model, Matrix& prod, std::mt19937& rng, int relax_periods = -1);
+
+// Sparsify: randomly set a fraction of cells to zero (helps sparse 0/1 style)
+void mutate_zero_sparse(const Model& model, Matrix& prod, std::mt19937& rng, double drop_prob = -1.0);
+
+// Local resample: with probability p reset some cells to U(0, scale*demand)
+void mutate_resample(const Model& model, Matrix& prod, std::mt19937& rng, double resample_prob = -1.0,
+                     double scale = 1.5);
+
+// Explicit on/off flip: if zero turn on with p_on; if >0 switch off with p_off
 void mutate_toggle_on_off(const Model& model, Matrix& prod, std::mt19937& rng,
                           double p_on = -1.0, double p_off = -1.0, double scale = 1.5);
 
+// Tournament selection over a score vector (lower is better).
+int tournament_select(const std::vector<double>& score, int k, std::mt19937& rng);
+
+// Pareto dominance utilities
 bool dominates(const SolutionMetrics& a, const SolutionMetrics& b, double tol = 1e-9);
 std::vector<int> non_dominated_indices(const std::vector<SolutionMetrics>& ms, double tol = 1e-9);
 
+// Crowding distance for one front; pop[i].metrics is accessed.
 template <typename Vec>
 std::vector<double> crowding_distance(const Vec& pop, const std::vector<int>& front) {
     int m = static_cast<int>(front.size());
@@ -84,6 +120,7 @@ std::vector<double> crowding_distance(const Vec& pop, const std::vector<int>& fr
     return dist;
 }
 
+// Fast non-dominated sort (fronts of indices) for a population exposing .metrics
 template <typename Vec>
 std::vector<std::vector<int>> fast_non_dominated_sort(const Vec& pop, double tol = 1e-9) {
     int n = static_cast<int>(pop.size());
